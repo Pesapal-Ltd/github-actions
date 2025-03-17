@@ -1,0 +1,108 @@
+name: Next.js Monorepo Development Build
+
+on:
+  push:
+    branches:
+      - development
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    environment: development
+    concurrency:
+      group: build-dev
+      cancel-in-progress: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: development
+
+      - uses: dtinth/setup-github-actions-caching-for-turbo@v1
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Setup turbo
+        run: pnpm i turbo@latest -g
+
+      - name: Run turbo prune
+        run: pnpm turbo prune @repo/web --out-dir=pruned
+
+      - name: Install dependencies in pruned workspace
+        run: |
+          cd pruned
+          pnpm install --frozen-lockfile
+
+      - name: Build with Next.js
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_URL: ${{ vars.NEXT_PUBLIC_URL }}
+          # Add your application's environment variables here
+          # Reference them from GitHub secrets or variables
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          AUTH_CLIENT_ID: ${{ secrets.AUTH_CLIENT_ID }}
+          AUTH_CLIENT_SECRET: ${{ secrets.AUTH_CLIENT_SECRET }}
+        run: |
+          cd pruned
+          pnpm build-prod
+
+      - name: Remove devDependencies from package.json files
+        run: |
+          cd pruned/apps/web/.next/standalone
+          # Copy PNPM files
+          cp ../../../../../pnpm-lock.yaml ./
+          cp ../../../../../pnpm-workspace.yaml ./
+          
+          # Find all package.json files and remove devDependencies from each
+          find . -name "package.json" -type f -exec sh -c 'jq "del(.devDependencies)" {} > temp.json && mv temp.json {}' \;
+          # Remove all node_modules directories recursively
+          find . -name "node_modules" -type d -exec rm -rf {} +
+
+      - name: Copy and Update ecosystem.config.js
+        run: |
+          # Copy ecosystem.config.js to standalone directory
+          cp apps/web/ecosystem.config.js pruned/apps/web/.next/standalone/
+          
+          # Update placeholders with actual values
+          cd pruned/apps/web/.next/standalone
+          sed -i 's|{{APP_SECRET}}|${{ secrets.APP_SECRET }}|g' ecosystem.config.js
+          sed -i 's|{{NEXT_PUBLIC_URL}}|${{ vars.NEXT_PUBLIC_URL }}|g' ecosystem.config.js
+          sed -i 's|{{DATABASE_URL}}|${{ secrets.DATABASE_URL }}|g' ecosystem.config.js
+          sed -i 's|{{AUTH_CLIENT_ID}}|${{ secrets.AUTH_CLIENT_ID }}|g' ecosystem.config.js
+          sed -i 's|{{AUTH_CLIENT_SECRET}}|${{ secrets.AUTH_CLIENT_SECRET }}|g' ecosystem.config.js
+          sed -i 's|{{AUTH_DISCOVERY_URL}}|${{ vars.AUTH_DISCOVERY_URL }}|g' ecosystem.config.js
+          sed -i 's|{{SERVICE_API_URL}}|${{ vars.SERVICE_API_URL }}|g' ecosystem.config.js
+          sed -i 's|{{SERVICE_API_USER}}|${{ secrets.SERVICE_API_USER }}|g' ecosystem.config.js
+          sed -i 's|{{SERVICE_API_KEY}}|${{ secrets.SERVICE_API_KEY }}|g' ecosystem.config.js
+          sed -i 's|{{ENABLE_FEATURE_X}}|${{ vars.ENABLE_FEATURE_X }}|g' ecosystem.config.js
+
+      # Optional: Copy database configuration files if needed
+      - name: Copy database files
+        run: |
+          # Create necessary directories
+          mkdir -p pruned/apps/web/.next/standalone/src/db
+          
+          # Copy database config
+          cp apps/web/db.config.ts pruned/apps/web/.next/standalone/
+          
+          # Copy entire db directory
+          cp -r apps/web/src/db/* pruned/apps/web/.next/standalone/src/db/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: pruned/apps/web/.next/standalone
+          include-hidden-files: true
+          retention-days: 7 

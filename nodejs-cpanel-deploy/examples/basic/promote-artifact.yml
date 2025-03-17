@@ -1,0 +1,120 @@
+name: Promote Build Artifact to Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Build ID or artifact name to promote'
+        required: true
+        type: string
+      environment:
+        description: 'Environment to deploy to (e.g., staging, production)'
+        required: true
+        type: string
+        default: 'staging'
+      app:
+        description: 'Application name'
+        required: true
+        type: string
+        default: ${{ github.event.repository.name }}
+      suffix_pattern:
+        description: 'Suffix pattern for environment (e.g., "-staging")'
+        required: false
+        type: string
+        default: '-{environment}'
+      auth_method:
+        description: 'Authentication method (ssh_key is strongly recommended)'
+        required: true
+        type: choice
+        options:
+          - ssh_key
+          - password
+        default: 'ssh_key'
+
+jobs:
+  deploy-to-environment:
+    name: Deploy to Environment
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-to-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Download the artifact that we want to promote
+      - name: Download build artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.build_id }}
+          path: ./artifact
+
+      - name: Generate timestamp for this deployment
+        id: timestamp
+        run: echo "timestamp=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+
+      # Create the deployment package with a timestamp
+      - name: Create deployment package
+        run: |
+          cd ./artifact
+          # Create zip file with the timestamp
+          zip -r ${{ inputs.app }}-${{ steps.timestamp.outputs.timestamp }}.zip .
+
+      # Set environment-specific variables
+      - name: Set environment-specific variables
+        id: env-vars
+        run: |
+          # Replace {environment} with the actual environment in the suffix pattern
+          SUFFIX="${{ inputs.suffix_pattern }}"
+          SUFFIX="${SUFFIX//\{environment\}/${{ inputs.environment }}}"
+          echo "app_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
+          
+          # Upper case the environment for secret names
+          ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+          echo "host_secret=${ENV_UPPER}_CPANEL_HOST" >> $GITHUB_OUTPUT
+          echo "username_secret=${ENV_UPPER}_CPANEL_USERNAME" >> $GITHUB_OUTPUT
+          
+          # Set appropriate secret names based on authentication method
+          if [[ "${{ inputs.auth_method }}" == "ssh_key" ]]; then
+            echo "key_secret=${ENV_UPPER}_CPANEL_SSH_KEY" >> $GITHUB_OUTPUT
+            echo "passphrase_secret=${ENV_UPPER}_CPANEL_KEY_PASSPHRASE" >> $GITHUB_OUTPUT
+          else
+            echo "password_secret=${ENV_UPPER}_CPANEL_PASSWORD" >> $GITHUB_OUTPUT
+            echo "::warning::Using password authentication is less secure than SSH keys. Consider switching to SSH key authentication."
+          fi
+
+      # Deploy using SSH key authentication (recommended)
+      - name: Deploy to cPanel with SSH Key
+        if: inputs.auth_method == 'ssh_key'
+        uses: Pesapal-Ltd/nodejs-cpanel-deploy@v1
+        with:
+          app_dir: ${{ vars.APP_DIR }}
+          app_name: ${{ inputs.app }}${{ steps.env-vars.outputs.app_suffix }}
+          package_path: ./artifact/${{ inputs.app }}-${{ steps.timestamp.outputs.timestamp }}.zip
+          timestamp: ${{ steps.timestamp.outputs.timestamp }}
+          host: ${{ secrets[steps.env-vars.outputs.host_secret] || secrets.CPANEL_HOST }}
+          username: ${{ secrets[steps.env-vars.outputs.username_secret] || secrets.CPANEL_USERNAME }}
+          ssh_key: ${{ secrets[steps.env-vars.outputs.key_secret] }}
+          key_passphrase: ${{ secrets[steps.env-vars.outputs.passphrase_secret] }}
+          auth_method: ssh_key
+
+      # Deploy using password authentication (not recommended)
+      - name: Deploy to cPanel with Password
+        if: inputs.auth_method == 'password'
+        uses: Pesapal-Ltd/nodejs-cpanel-deploy@v1
+        with:
+          app_dir: ${{ vars.APP_DIR }}
+          app_name: ${{ inputs.app }}${{ steps.env-vars.outputs.app_suffix }}
+          package_path: ./artifact/${{ inputs.app }}-${{ steps.timestamp.outputs.timestamp }}.zip
+          timestamp: ${{ steps.timestamp.outputs.timestamp }}
+          host: ${{ secrets[steps.env-vars.outputs.host_secret] || secrets.CPANEL_HOST }}
+          username: ${{ secrets[steps.env-vars.outputs.username_secret] || secrets.CPANEL_USERNAME }}
+          password: ${{ secrets[steps.env-vars.outputs.password_secret] || secrets.CPANEL_PASSWORD }}
+          auth_method: password
+
+      - name: Post-Deployment Notification
+        run: |
+          echo "Successfully deployed ${{ inputs.app }}${{ steps.env-vars.outputs.app_suffix }} to ${{ inputs.environment }} environment"
+          echo "Artifact used: ${{ inputs.build_id }}"
+          echo "Deployment timestamp: ${{ steps.timestamp.outputs.timestamp }}" 

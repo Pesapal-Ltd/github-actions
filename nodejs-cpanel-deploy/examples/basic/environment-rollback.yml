@@ -1,0 +1,93 @@
+name: Rollback Deployment by Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      timestamp:
+        description: 'Timestamp of the deployment to roll back to (format: YYYYMMDDHHMMSS)'
+        required: true
+        type: string
+      app:
+        description: 'Application name'
+        required: true
+        type: string
+        default: ${{ github.event.repository.name }}
+      environment:
+        description: 'Environment to rollback (production, staging)'
+        required: true
+        type: string
+        default: 'production'
+      suffix_pattern:
+        description: 'Suffix pattern for environment (e.g., "-staging" or empty for prod)'
+        required: false
+        type: string
+        default: '-{environment}'
+      auth_method:
+        description: 'Authentication method (ssh_key is strongly recommended)'
+        required: true
+        type: choice
+        options:
+          - ssh_key
+          - password
+        default: 'ssh_key'
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Set environment-specific variables
+        id: env-vars
+        run: |
+          # Replace {environment} with the actual environment in the suffix pattern
+          SUFFIX="${{ inputs.suffix_pattern }}"
+          SUFFIX="${SUFFIX//\{environment\}/${{ inputs.environment }}}"
+          echo "app_suffix=${SUFFIX}" >> $GITHUB_OUTPUT
+          
+          # Upper case the environment for secret names
+          ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+          echo "host_secret=${ENV_UPPER}_CPANEL_HOST" >> $GITHUB_OUTPUT
+          echo "username_secret=${ENV_UPPER}_CPANEL_USERNAME" >> $GITHUB_OUTPUT
+          
+          # Set appropriate secret names based on authentication method
+          if [[ "${{ inputs.auth_method }}" == "ssh_key" ]]; then
+            echo "key_secret=${ENV_UPPER}_CPANEL_SSH_KEY" >> $GITHUB_OUTPUT
+            echo "passphrase_secret=${ENV_UPPER}_CPANEL_KEY_PASSPHRASE" >> $GITHUB_OUTPUT
+          else
+            echo "password_secret=${ENV_UPPER}_CPANEL_PASSWORD" >> $GITHUB_OUTPUT
+            echo "::warning::Using password authentication is less secure than SSH keys. Consider switching to SSH key authentication."
+          fi
+
+      # Rollback using SSH key authentication (recommended)
+      - name: Rollback with SSH Key
+        if: inputs.auth_method == 'ssh_key'
+        uses: Pesapal-Ltd/nodejs-cpanel-deploy@v1
+        with:
+          app_dir: ${{ vars.APP_DIR }}
+          app_name: ${{ inputs.app }}${{ steps.env-vars.outputs.app_suffix }}
+          host: ${{ secrets[steps.env-vars.outputs.host_secret] || secrets.CPANEL_HOST }}
+          username: ${{ secrets[steps.env-vars.outputs.username_secret] || secrets.CPANEL_USERNAME }}
+          ssh_key: ${{ secrets[steps.env-vars.outputs.key_secret] }}
+          key_passphrase: ${{ secrets[steps.env-vars.outputs.passphrase_secret] }}
+          auth_method: ssh_key
+          operation: rollback
+          rollback_timestamp: ${{ inputs.timestamp }}
+
+      # Rollback using password authentication (not recommended)
+      - name: Rollback with Password
+        if: inputs.auth_method == 'password'
+        uses: Pesapal-Ltd/nodejs-cpanel-deploy@v1
+        with:
+          app_dir: ${{ vars.APP_DIR }}
+          app_name: ${{ inputs.app }}${{ steps.env-vars.outputs.app_suffix }}
+          host: ${{ secrets[steps.env-vars.outputs.host_secret] || secrets.CPANEL_HOST }}
+          username: ${{ secrets[steps.env-vars.outputs.username_secret] || secrets.CPANEL_USERNAME }}
+          password: ${{ secrets[steps.env-vars.outputs.password_secret] || secrets.CPANEL_PASSWORD }}
+          auth_method: password
+          operation: rollback
+          rollback_timestamp: ${{ inputs.timestamp }}
+
+      - name: Rollback Notification
+        run: |
+          echo "Successfully rolled back ${{ inputs.app }}${{ steps.env-vars.outputs.app_suffix }} in ${{ inputs.environment }} environment"
+          echo "Reverted to deployment timestamp: ${{ inputs.timestamp }}" 

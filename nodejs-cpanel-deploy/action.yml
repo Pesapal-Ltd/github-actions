@@ -1,0 +1,135 @@
+name: "Node.js cPanel Deploy Action"
+description: "Deploys a Node.js application to a cPanel server and manages PM2 processes"
+
+inputs:
+  app_dir:
+    description: "Target directory on cPanel server"
+    required: true
+
+  app_name:
+    description: "Application name"
+    required: true
+    
+  package_path:
+    description: "Path to the zipped application package"
+    required: false
+    
+  timestamp:
+    description: "Timestamp for the deployment"
+    required: true
+  
+  host:
+    description: "cPanel server hostname"
+    required: true
+    
+  username:
+    description: "cPanel username"
+    required: true
+    
+  password:
+    description: "cPanel password (for password auth)"
+    required: false
+    
+  ssh_key:
+    description: "SSH private key (for SSH key auth)"
+    required: false
+    
+  key_passphrase:
+    description: "Passphrase for the SSH key"
+    required: false
+    
+  auth_method:
+    description: "Authentication method (ssh_key or password)"
+    required: true
+    default: "ssh_key"
+    
+  operation:
+    description: "Operation to perform (deploy or rollback)"
+    required: false
+    default: "deploy"
+    
+  rollback_timestamp:
+    description: "Timestamp to roll back to"
+    required: false
+    
+  port:
+    description: "SSH port"
+    required: false
+    default: "22"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Copy package to cPanel server
+      uses: appleboy/scp-action@master
+      if: inputs.operation == 'deploy'
+      with:
+        host: ${{ inputs.host }}
+        port: ${{ inputs.port }}
+        username: ${{ inputs.username }}
+        key: ${{ inputs.ssh_key }}
+        password: ${{ inputs.password }}
+        passphrase: ${{ inputs.key_passphrase }}
+        source: "${{ inputs.package_path }}"
+        target: "~/repositories"
+
+    - name: Deploy application
+      uses: appleboy/ssh-action@master
+      if: inputs.operation == 'deploy'
+      with:
+        host: ${{ inputs.host }}
+        port: ${{ inputs.port }}
+        username: ${{ inputs.username }}
+        key: ${{ inputs.ssh_key }}
+        password: ${{ inputs.password }}
+        passphrase: ${{ inputs.key_passphrase }}
+        script: |
+          # Remove old files
+          rm -rf ~/repositories/${{ inputs.app_name }}
+
+          # Extract new files
+          unzip -o ~/repositories/${{ inputs.package_path }} -d ~/repositories/${{ inputs.app_name }}/
+
+          # Install production dependencies
+          cd ~/repositories/${{ inputs.app_name }}
+          npm install --production --force
+
+          # Set active flag
+          echo "$(basename ${{ inputs.package_path }})" > ~/repositories/active-${{ inputs.app_name }}
+
+          # Restart PM2 processes
+          /opt/cpanel/ea-nodejs18/bin/pm2 restart ~/repositories/${{ inputs.app_name }}/ecosystem.config.js
+          
+    - name: Rollback application
+      uses: appleboy/ssh-action@master
+      if: inputs.operation == 'rollback'
+      with:
+        host: ${{ inputs.host }}
+        port: ${{ inputs.port }}
+        username: ${{ inputs.username }}
+        key: ${{ inputs.ssh_key }}
+        password: ${{ inputs.password }}
+        passphrase: ${{ inputs.key_passphrase }}
+        script: |
+          # Check if the specified deployment exists
+          if [ ! -f ~/repositories/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip ]; then
+            echo "Error: Deployment artifact ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip not found"
+            echo "Available deployment artifacts:"
+            ls -la ~/repositories/${{ inputs.app_name }}*.zip
+            exit 1
+          fi
+          
+          # Set this deployment as the active one
+          echo "${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip" > ~/repositories/active-${{ inputs.app_name }}
+          
+          # Clean the application directory
+          rm -rf ~/repositories/${{ inputs.app_name }}
+          
+          # Extract the specified deployment
+          unzip -o ~/repositories/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip -d ~/repositories/${{ inputs.app_name }}/
+          
+          # Restart the application with PM2
+          cd ~/repositories/${{ inputs.app_name }}
+          /opt/cpanel/ea-nodejs18/bin/pm2 restart ~/repositories/${{ inputs.app_name }}/ecosystem.config.js
+          
+          echo "Successfully rolled back to deployment ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip" 

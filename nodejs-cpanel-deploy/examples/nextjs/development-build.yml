@@ -1,0 +1,90 @@
+name: Next.js Single Repo Development Build
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.json'
+      - 'package.json'
+      - '.github/workflows/development-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Next.js Application
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build Next.js application
+        env:
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
+        run: npm run build
+        
+      - name: Prepare deployment package
+        run: |
+          # Create deployment directory
+          mkdir -p deployment
+          
+          # Copy build output
+          cp -r .next deployment/
+          cp -r public deployment/
+          cp package.json deployment/
+          cp next.config.js deployment/ || cp next.config.ts deployment/ || echo "No next.config file found"
+          cp ecosystem.config.js deployment/ || echo "No ecosystem.config.js found, using default"
+          
+          # If no ecosystem file exists, create a default one
+          if [ ! -f deployment/ecosystem.config.js ]; then
+            cat > deployment/ecosystem.config.js << 'EOL'
+            module.exports = {
+              apps: [
+                {
+                  name: process.env.APP_NAME || "nextjs-app",
+                  script: "node_modules/next/dist/bin/next",
+                  args: "start",
+                  instances: "max",
+                  exec_mode: "cluster",
+                  watch: false,
+                  env: {
+                    NODE_ENV: "production",
+                    PORT: 3000
+                  }
+                }
+              ]
+            };
+            EOL
+          fi
+          
+          # Install production dependencies only
+          cd deployment
+          npm ci --only=production
+          
+      - name: Generate timestamp
+        id: timestamp
+        run: echo "timestamp=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+        
+      - name: Create artifact
+        run: |
+          cd deployment
+          zip -r ../${{ github.event.repository.name }}-${{ steps.timestamp.outputs.timestamp }}.zip .
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ github.event.repository.name }}-build
+          path: ${{ github.event.repository.name }}-${{ steps.timestamp.outputs.timestamp }}.zip
+          retention-days: 7 

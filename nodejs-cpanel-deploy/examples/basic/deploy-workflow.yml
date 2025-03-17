@@ -1,0 +1,52 @@
+name: Deploy Node.js App to cPanel
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Generate timestamp
+        id: timestamp
+        run: echo "timestamp=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create deployment package
+        run: |
+          # Create zip file with the timestamp
+          zip -r ${{ github.event.repository.name }}-${{ steps.timestamp.outputs.timestamp }}.zip \
+            dist/ \
+            package.json \
+            package-lock.json \
+            ecosystem.config.js \
+            .env.production
+
+      - name: Deploy to cPanel
+        uses: Pesapal-Ltd/nodejs-cpanel-deploy@v1
+        with:
+          app_dir: ${{ vars.APP_DIR }}
+          app_name: ${{ github.event.repository.name }}
+          package_path: ${{ github.event.repository.name }}-${{ steps.timestamp.outputs.timestamp }}.zip
+          timestamp: ${{ steps.timestamp.outputs.timestamp }}
+          host: ${{ secrets.CPANEL_HOST }}
+          username: ${{ secrets.CPANEL_USERNAME }}
+          ssh_key: ${{ secrets.CPANEL_SSH_KEY }}
+          key_passphrase: ${{ secrets.CPANEL_KEY_PASSPHRASE }}
+          auth_method: ssh_key 

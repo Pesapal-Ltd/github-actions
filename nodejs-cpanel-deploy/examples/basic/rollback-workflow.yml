@@ -1,0 +1,50 @@
+name: Rollback Node.js App Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      timestamp:
+        description: 'Timestamp of the deployment to roll back to (format: YYYYMMDDHHMMSS)'
+        required: true
+        type: string
+      app:
+        description: 'Application name'
+        required: true
+        type: string
+        default: ${{ github.event.repository.name }}
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rollback deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.CPANEL_HOST }}
+          port: 22
+          username: ${{ secrets.CPANEL_USERNAME }}
+          key: ${{ secrets.CPANEL_SSH_KEY }}
+          passphrase: ${{ secrets.CPANEL_KEY_PASSPHRASE }}
+          script: |
+            # Check if the specified deployment exists
+            if [ ! -f ~/repositories/${{ inputs.app }}-${{ inputs.timestamp }}.zip ]; then
+              echo "Error: Deployment artifact ${{ inputs.app }}-${{ inputs.timestamp }}.zip not found"
+              echo "Available deployment artifacts:"
+              ls -la ~/repositories/${{ inputs.app }}*.zip
+              exit 1
+            fi
+            
+            # Set this deployment as the active one
+            echo "${{ inputs.app }}-${{ inputs.timestamp }}.zip" > ~/repositories/active-${{ inputs.app }}
+            
+            # Clean the application directory
+            rm -rf ~/repositories/${{ inputs.app }}
+            
+            # Extract the specified deployment
+            unzip -o ~/repositories/${{ inputs.app }}-${{ inputs.timestamp }}.zip -d ~/repositories/${{ inputs.app }}/
+            
+            # Restart the application with PM2
+            cd ~/repositories/${{ inputs.app }}
+            /opt/cpanel/ea-nodejs18/bin/pm2 restart ~/repositories/${{ inputs.app }}/ecosystem.config.js
+            
+            echo "Successfully rolled back to deployment ${{ inputs.app }}-${{ inputs.timestamp }}.zip" 
