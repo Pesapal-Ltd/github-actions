@@ -1,10 +1,11 @@
 name: "Node.js cPanel Deploy Action"
-description: "Deploys a Node.js application to a cPanel server and manages PM2 processes"
+description: "Deploys a Node.js application to a cPanel server with flexible configuration options"
 
 inputs:
   app_dir:
-    description: "Target directory on cPanel server"
-    required: true
+    description: "Target directory on cPanel server (root directory for deployments)"
+    required: false
+    default: "~/repositories"
 
   app_name:
     description: "Application name"
@@ -56,6 +57,26 @@ inputs:
     description: "SSH port"
     required: false
     default: "22"
+  
+  nodejs_path:
+    description: "Path to Node.js installation on the server"
+    required: false
+    default: "/opt/cpanel/ea-nodejs18/bin"
+  
+  package_manager:
+    description: "Package manager to use (npm, yarn, pnpm, bun)"
+    required: false
+    default: "npm"
+  
+  use_pm2:
+    description: "Whether to manage the application with PM2"
+    required: false
+    default: "true"
+  
+  pm2_config_path:
+    description: "Path to PM2 ecosystem config file (relative to app directory)"
+    required: false
+    default: "ecosystem.config.js"
 
 runs:
   using: "composite"
@@ -71,7 +92,7 @@ runs:
         password: ${{ inputs.password }}
         passphrase: ${{ inputs.key_passphrase }}
         source: "${{ inputs.package_path }}"
-        target: "~/repositories"
+        target: "${{ inputs.app_dir }}"
 
     - name: Deploy application
       uses: appleboy/ssh-action@master
@@ -85,20 +106,49 @@ runs:
         passphrase: ${{ inputs.key_passphrase }}
         script: |
           # Remove old files
-          rm -rf ~/repositories/${{ inputs.app_name }}
+          rm -rf ${{ inputs.app_dir }}/${{ inputs.app_name }}
 
           # Extract new files
-          unzip -o ~/repositories/${{ inputs.package_path }} -d ~/repositories/${{ inputs.app_name }}/
+          unzip -o ${{ inputs.app_dir }}/$(basename ${{ inputs.package_path }}) -d ${{ inputs.app_dir }}/${{ inputs.app_name }}/
 
           # Install production dependencies
-          cd ~/repositories/${{ inputs.app_name }}
-          npm install --production --force
+          cd ${{ inputs.app_dir }}/${{ inputs.app_name }}
+          
+          # Install dependencies based on selected package manager
+          case "${{ inputs.package_manager }}" in
+            "npm")
+              ${{ inputs.nodejs_path }}/npm install --production --force
+              ;;
+            "yarn")
+              ${{ inputs.nodejs_path }}/yarn install --production
+              ;;
+            "pnpm")
+              ${{ inputs.nodejs_path }}/pnpm install --prod
+              ;;
+            "bun")
+              ${{ inputs.nodejs_path }}/bun install --production
+              ;;
+            *)
+              echo "Unsupported package manager: ${{ inputs.package_manager }}, falling back to npm"
+              ${{ inputs.nodejs_path }}/npm install --production --force
+              ;;
+          esac
 
           # Set active flag
-          echo "$(basename ${{ inputs.package_path }})" > ~/repositories/active-${{ inputs.app_name }}
+          echo "$(basename ${{ inputs.package_path }})" > ${{ inputs.app_dir }}/active-${{ inputs.app_name }}
 
-          # Restart PM2 processes
-          /opt/cpanel/ea-nodejs18/bin/pm2 restart ~/repositories/${{ inputs.app_name }}/ecosystem.config.js
+          # Restart PM2 processes if PM2 is enabled
+          if [ "${{ inputs.use_pm2 }}" = "true" ]; then
+            if [ -f ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }} ]; then
+              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}
+            else
+              echo "Warning: PM2 config file not found at ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}"
+              echo "Attempting to start the application using package.json start script..."
+              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/
+            fi
+          else
+            echo "PM2 management is disabled. Skipping PM2 restart."
+          fi
           
     - name: Rollback application
       uses: appleboy/ssh-action@master
@@ -112,24 +162,35 @@ runs:
         passphrase: ${{ inputs.key_passphrase }}
         script: |
           # Check if the specified deployment exists
-          if [ ! -f ~/repositories/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip ]; then
+          if [ ! -f ${{ inputs.app_dir }}/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip ]; then
             echo "Error: Deployment artifact ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip not found"
             echo "Available deployment artifacts:"
-            ls -la ~/repositories/${{ inputs.app_name }}*.zip
+            ls -la ${{ inputs.app_dir }}/${{ inputs.app_name }}*.zip
             exit 1
           fi
           
           # Set this deployment as the active one
-          echo "${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip" > ~/repositories/active-${{ inputs.app_name }}
+          echo "${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip" > ${{ inputs.app_dir }}/active-${{ inputs.app_name }}
           
           # Clean the application directory
-          rm -rf ~/repositories/${{ inputs.app_name }}
+          rm -rf ${{ inputs.app_dir }}/${{ inputs.app_name }}
           
           # Extract the specified deployment
-          unzip -o ~/repositories/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip -d ~/repositories/${{ inputs.app_name }}/
+          unzip -o ${{ inputs.app_dir }}/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip -d ${{ inputs.app_dir }}/${{ inputs.app_name }}/
           
-          # Restart the application with PM2
-          cd ~/repositories/${{ inputs.app_name }}
-          /opt/cpanel/ea-nodejs18/bin/pm2 restart ~/repositories/${{ inputs.app_name }}/ecosystem.config.js
+          # Restart the application with PM2 if enabled
+          cd ${{ inputs.app_dir }}/${{ inputs.app_name }}
           
-          echo "Successfully rolled back to deployment ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip" 
+          if [ "${{ inputs.use_pm2 }}" = "true" ]; then
+            if [ -f ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }} ]; then
+              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}
+            else
+              echo "Warning: PM2 config file not found at ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}"
+              echo "Attempting to start the application using package.json start script..."
+              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/
+            fi
+            echo "Successfully rolled back to deployment ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip"
+          else
+            echo "PM2 management is disabled. Skipping PM2 restart."
+            echo "Successfully rolled back to deployment ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip"
+          fi 

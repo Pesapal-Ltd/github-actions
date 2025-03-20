@@ -1,4 +1,4 @@
-# Reusable GitHub Actions
+# Reusable GitHub Actions (WIP you have been warned)
 
 This repository contains a collection of reusable GitHub Actions that can be used across different projects.
 
@@ -13,12 +13,14 @@ Deployment should never be a bottleneck in your development process. Manual depl
 We recommend implementing a multi-stage deployment pipeline with proper gates between environments:
 
 1. **Development Testing**
+
    - On every push to the `development` branch (or via manual trigger)
    - Run a test build to verify that the code builds successfully
    - Implement branch protection rules that prevent merging PRs into `development` if the test build fails
    - Store artifacts for potential promotion to staging
 
 2. **Staging Promotion**
+
    - When merging from `development` to `staging`
    - Retrieve the most recent successful development build
    - Deploy to staging environment for thorough testing
@@ -58,6 +60,7 @@ This pipeline ensures code is thoroughly tested at each stage while maintaining 
 ```
 
 **Branch Protection Rules:**
+
 - PRs to `development`: Must pass test build
 - PRs to `staging`: Must be from `development`
 - PRs to `main`: Must be from `staging` and have QA approval
@@ -67,11 +70,13 @@ This pipeline ensures code is thoroughly tested at each stage while maintaining 
 A robust deployment system must plan for failures. Our deployment actions incorporate these principles:
 
 1. **Artifact Retention**
+
    - The most recent 3-5 deployment artifacts (configurable) are preserved on the server
    - Each artifact is a complete, timestamped snapshot of the application
    - This creates a historical record and enables quick rollbacks
 
 2. **Active Deployment Tracking**
+
    - An "active flag" file (e.g., `active-{appname}`) is maintained on the server
    - This file contains the timestamp of the currently active deployment
    - The system uses this flag to identify which deployment is currently running
@@ -123,12 +128,18 @@ This action deploys a Node.js application to a cPanel server using SSH and start
 - name: Deploy to cPanel
   uses: Pesapal-Ltd/github-actions/nodejs-cpanel-deploy@main
   with:
-    app: "your-app-name"
-    TIMESTAMP: ${{ steps.timestamp.outputs.timestamp }}
-    CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
-    CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
-    CPANEL_KEY: ${{ secrets.CPANEL_SSH_KEY }}
-    CPANEL_KEY_PASSWORD: ${{ secrets.CPANEL_KEY_PASSPHRASE }}
+    app_name: "your-app-name"
+    timestamp: ${{ steps.timestamp.outputs.timestamp }}
+    host: ${{ secrets.CPANEL_HOST }}
+    username: ${{ secrets.CPANEL_USERNAME }}
+    ssh_key: ${{ secrets.CPANEL_SSH_KEY }}
+    key_passphrase: ${{ secrets.CPANEL_KEY_PASSPHRASE }}
+    # Optional advanced customization
+    app_dir: "~/custom/path"
+    nodejs_path: "/custom/node/path"
+    package_manager: "npm" # npm, yarn, pnpm, or bun
+    use_pm2: "true"
+    pm2_config_path: "ecosystem.config.js"
 ```
 
 ## How to Use These Actions
@@ -148,6 +159,7 @@ jobs:
 ```
 
 2. Configure the required secrets in your repository:
+
    - Go to your repository settings
    - Select "Secrets and variables" → "Actions"
    - Add the necessary secrets (e.g., `CPANEL_HOST`, `CPANEL_USERNAME`, `CPANEL_SSH_KEY`)
@@ -161,9 +173,11 @@ Each action directory contains example workflow files in an 'examples' subdirect
 ### Node.js cPanel Deploy Examples
 
 #### Basic Examples
+
 - [Basic Node.js Deployment](./nodejs-cpanel-deploy/examples/basic/deploy-workflow.yml)
 
 #### Next.js Monorepo Examples
+
 - [Next.js Development Build](./nodejs-cpanel-deploy/examples/nextjs/development-build.yml)
 - [Next.js Production Build and Deploy](./nodejs-cpanel-deploy/examples/nextjs/production-build-and-deploy.yml)
 - [Next.js PM2 Configuration](./nodejs-cpanel-deploy/examples/nextjs/ecosystem.config.js)
@@ -178,4 +192,4 @@ Each action directory contains example workflow files in an 'examples' subdirect
 
 ## License
 
-MIT 
+MIT

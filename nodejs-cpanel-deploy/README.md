@@ -1,6 +1,6 @@
 # Node.js cPanel Deploy Action
 
-This GitHub Action deploys a Node.js application to a cPanel server and manages PM2 processes for reliable Node.js application hosting.
+This GitHub Action deploys a Node.js application to a cPanel server and manages PM2 processes for reliable Node.js application hosting. It supports multiple package managers, custom Node.js paths, and flexible deployment configurations.
 
 ## Deployment Philosophy
 
@@ -33,7 +33,7 @@ This approach provides the right balance between efficiency (reusing builds wher
 
 ## Prerequisites
 
-- A zipped Node.js application with an `ecosystem.config.js` file for PM2
+- A zipped Node.js application with an `ecosystem.config.js` file for PM2 (optional if not using PM2)
 - SSH access to a cPanel server
 - An SSH private key for secure authentication (strongly recommended)
 
@@ -56,7 +56,6 @@ jobs:
       - name: Deploy to cPanel
         uses: Pesapal-Ltd/nodejs-cpanel-deploy@v1
         with:
-          app_dir: "public_html/your-app"
           app_name: "your-app-name"
           package_path: "./your-app-name-${{ steps.timestamp.outputs.timestamp }}.zip"
           timestamp: ${{ steps.timestamp.outputs.timestamp }}
@@ -65,6 +64,12 @@ jobs:
           ssh_key: ${{ secrets.CPANEL_SSH_KEY }}
           key_passphrase: ${{ secrets.CPANEL_KEY_PASSPHRASE }}
           auth_method: ssh_key  # Strongly recommended
+          # Optional customizations
+          app_dir: "~/repositories"
+          nodejs_path: "/opt/cpanel/ea-nodejs18/bin"
+          package_manager: "npm"
+          use_pm2: "true"
+          pm2_config_path: "ecosystem.config.js"
 ```
 
 ## Example Workflows
@@ -85,20 +90,51 @@ See the [examples directory](./examples/) for more information on our workflow o
 
 ## Inputs
 
-| Input                | Description                           | Required | Default |
-|----------------------|---------------------------------------|----------|---------|
-| `app_dir`            | Target directory on cPanel server     | Yes      | -       |
-| `app_name`           | Your application name                 | Yes      | -       |
-| `package_path`       | Path to the zipped application        | Yes (for deploy) | -       |
-| `timestamp`          | Timestamp for the deployment          | Yes      | -       |
-| `host`               | Hostname or IP of the cPanel server   | Yes      | -       |
-| `username`           | cPanel username                       | Yes      | -       |
-| `password`           | cPanel password (for password auth)   | For password auth | -       |
-| `ssh_key`            | SSH private key (for SSH key auth)    | For SSH key auth | -       |
-| `key_passphrase`     | Passphrase for the SSH key            | No       | -       |
-| `auth_method`        | `ssh_key` or `password`               | Yes      | ssh_key |
-| `operation`          | `deploy` or `rollback`                | No       | deploy  |
-| `rollback_timestamp` | Timestamp to roll back to             | For rollbacks | -    |
+| Input                | Description                                 | Required | Default                     |
+|----------------------|---------------------------------------------|----------|----------------------------|
+| `app_dir`            | Root directory on cPanel server             | No       | `~/repositories`           |
+| `app_name`           | Your application name                       | Yes      | -                          |
+| `package_path`       | Path to the zipped application              | Yes (for deploy) | -                 |
+| `timestamp`          | Timestamp for the deployment                | Yes      | -                          |
+| `host`               | Hostname or IP of the cPanel server         | Yes      | -                          |
+| `username`           | cPanel username                             | Yes      | -                          |
+| `password`           | cPanel password (for password auth)         | For password auth | -               |
+| `ssh_key`            | SSH private key (for SSH key auth)          | For SSH key auth | -                |
+| `key_passphrase`     | Passphrase for the SSH key                  | No       | -                          |
+| `auth_method`        | `ssh_key` or `password`                     | Yes      | `ssh_key`                  |
+| `operation`          | `deploy` or `rollback`                      | No       | `deploy`                   |
+| `rollback_timestamp` | Timestamp to roll back to                   | For rollbacks | -                     |
+| `nodejs_path`        | Path to Node.js installation on server      | No       | `/opt/cpanel/ea-nodejs18/bin` |
+| `package_manager`    | Package manager (npm, yarn, pnpm, bun)      | No       | `npm`                      |
+| `use_pm2`            | Whether to manage app with PM2              | No       | `true`                     |
+| `pm2_config_path`    | Path to PM2 config file                     | No       | `ecosystem.config.js`      |
+
+## New Customization Features
+
+### Package Manager Support
+The action now supports multiple package managers:
+- **npm**: Standard Node.js package manager
+- **yarn**: Fast, reliable alternative to npm
+- **pnpm**: Disk space efficient package manager
+- **bun**: Ultra-fast JavaScript runtime and package manager
+
+### Node.js Path Customization
+You can now specify a custom path to your Node.js installation:
+- Useful for environments with multiple Node.js versions
+- Makes the action compatible with non-standard cPanel setups
+- Default is set to cPanel's EA-NodeJS 18 path
+
+### PM2 Management (Optional)
+PM2 management can now be disabled if you're using another process manager:
+- Set `use_pm2: "false"` to skip PM2-related operations
+- Useful if you're using systemd, Forever.js, or other process managers
+- When disabled, the action will only deploy files without managing processes
+
+### Custom PM2 Configuration Path
+You can specify a custom path to your PM2 ecosystem config:
+- Default is `ecosystem.config.js` in your application root
+- Allows for environment-specific PM2 configurations
+- Action will attempt to use package.json start script if the config file is not found
 
 ## Authentication Methods
 
@@ -121,9 +157,9 @@ We strongly recommend using SSH key authentication for all deployments.
 
 1. The action copies the zipped application to the cPanel server
 2. Extracts the application to the proper directory
-3. Installs production dependencies
+3. Installs production dependencies using the specified package manager
 4. Sets an active flag to indicate the current deployment
-5. Restarts the PM2 processes using the ecosystem.config.js file
+5. Optionally restarts the PM2 processes if PM2 management is enabled
 
 ## Artifact Management and Rollbacks
 
@@ -151,7 +187,7 @@ To roll back to a previous deployment, you can:
 The rollback process:
 1. Updates the active flag to point to a previous deployment
 2. Extracts the previous deployment artifact
-3. Restarts the application with PM2
+3. Restarts the application with PM2 (if enabled)
 4. All without requiring a rebuild
 
 ## Complete Deployment Pipeline
