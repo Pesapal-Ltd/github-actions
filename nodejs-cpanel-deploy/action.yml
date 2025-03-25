@@ -87,6 +87,11 @@ inputs:
     description: "Number of recent deployments to keep when cleanup is enabled"
     required: false
     default: "5"
+    
+  pnpm_path:
+    description: "Path to a custom pnpm installation (useful if the default path doesn't work)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -115,6 +120,10 @@ runs:
         password: ${{ inputs.password }}
         passphrase: ${{ inputs.key_passphrase }}
         script: |
+          # Set Node.js path in environment
+          export PATH=${{ inputs.nodejs_path }}:$PATH
+          echo "Added ${{ inputs.nodejs_path }} to PATH"
+          
           # Remove old files
           rm -rf ${{ inputs.app_dir }}/${{ inputs.app_name }}
 
@@ -127,20 +136,43 @@ runs:
           # Install dependencies based on selected package manager
           case "${{ inputs.package_manager }}" in
             "npm")
-              ${{ inputs.nodejs_path }}/npm install --production --force
+              npm install --production --force
               ;;
             "yarn")
-              ${{ inputs.nodejs_path }}/yarn install --production
+              yarn install --production
               ;;
             "pnpm")
-              ${{ inputs.nodejs_path }}/pnpm install --prod
+              # Check Node.js version to determine if it can run pnpm directly
+              NODE_VERSION=$(node -v | cut -d 'v' -f2)
+              NODE_MAJOR_VERSION=$(echo $NODE_VERSION | cut -d '.' -f1)
+              
+              # Check if a custom pnpm path is provided
+              if [ ! -z "${{ inputs.pnpm_path }}" ]; then
+                echo "Using custom pnpm path: ${{ inputs.pnpm_path }}"
+                ${{ inputs.pnpm_path }} install --prod
+              elif [ $NODE_MAJOR_VERSION -ge 14 ]; then
+                # Node.js version is 14 or later, try to use pnpm normally
+                if command -v pnpm &> /dev/null; then
+                  echo "Using pnpm from PATH"
+                  pnpm install --prod
+                else
+                  echo "pnpm not found. Attempting to install it..."
+                  npm install -g pnpm
+                  pnpm install --prod
+                fi
+              else
+                # Node.js version is too old for modern pnpm, use npm instead
+                echo "Warning: Your Node.js version ($NODE_VERSION) is too old to run modern pnpm."
+                echo "Falling back to npm. Consider upgrading Node.js or using npm/yarn instead."
+                npm install --production --force
+              fi
               ;;
             "bun")
-              ${{ inputs.nodejs_path }}/bun install --production
+              bun install --production
               ;;
             *)
               echo "Unsupported package manager: ${{ inputs.package_manager }}, falling back to npm"
-              ${{ inputs.nodejs_path }}/npm install --production --force
+              npm install --production --force
               ;;
           esac
 
@@ -150,11 +182,11 @@ runs:
           # Restart PM2 processes if PM2 is enabled
           if [ "${{ inputs.use_pm2 }}" = "true" ]; then
             if [ -f ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }} ]; then
-              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}
+              pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}
             else
               echo "Warning: PM2 config file not found at ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}"
               echo "Attempting to start the application using package.json start script..."
-              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/
+              pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/
             fi
           else
             echo "PM2 management is disabled. Skipping PM2 restart."
@@ -212,6 +244,10 @@ runs:
         password: ${{ inputs.password }}
         passphrase: ${{ inputs.key_passphrase }}
         script: |
+          # Set Node.js path in environment
+          export PATH=${{ inputs.nodejs_path }}:$PATH
+          echo "Added ${{ inputs.nodejs_path }} to PATH"
+          
           # Check if the specified deployment exists
           if [ ! -f ${{ inputs.app_dir }}/${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip ]; then
             echo "Error: Deployment artifact ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip not found"
@@ -234,11 +270,11 @@ runs:
           
           if [ "${{ inputs.use_pm2 }}" = "true" ]; then
             if [ -f ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }} ]; then
-              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}
+              pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}
             else
               echo "Warning: PM2 config file not found at ${{ inputs.app_dir }}/${{ inputs.app_name }}/${{ inputs.pm2_config_path }}"
               echo "Attempting to start the application using package.json start script..."
-              ${{ inputs.nodejs_path }}/pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/
+              pm2 restart ${{ inputs.app_dir }}/${{ inputs.app_name }}/
             fi
             echo "Successfully rolled back to deployment ${{ inputs.app_name }}-${{ inputs.rollback_timestamp }}.zip"
           else

@@ -72,6 +72,7 @@ jobs:
           pm2_config_path: "ecosystem.config.js"
           cleanup_old_deployments: "true"
           keep_deployments: "5"
+          pnpm_path: "/path/to/compatible/pnpm" # Optional: only if default pnpm has issues
 ```
 
 ## Example Workflows
@@ -112,6 +113,7 @@ See the [examples directory](./examples/) for more information on our workflow o
 | `pm2_config_path`       | Path to PM2 config file                     | No       | `ecosystem.config.js`      |
 | `cleanup_old_deployments` | Whether to delete old deployment packages | No       | `false`                    |
 | `keep_deployments`      | Number of recent deployments to keep        | No       | `5`                        |
+| `pnpm_path`             | Path to a custom pnpm installation          | No       | `""`                       |
 
 ## New Customization Features
 
@@ -119,14 +121,20 @@ See the [examples directory](./examples/) for more information on our workflow o
 The action now supports multiple package managers:
 - **npm**: Standard Node.js package manager
 - **yarn**: Fast, reliable alternative to npm
-- **pnpm**: Disk space efficient package manager
+- **pnpm**: Disk space efficient package manager (requires Node.js ≥ 14)
 - **bun**: Ultra-fast JavaScript runtime and package manager
+
+> **Note about pnpm compatibility**: Modern versions of pnpm require Node.js 14 or later. If your cPanel server runs an older version, you can either:
+> 1. Set a custom pnpm path with the `pnpm_path` parameter
+> 2. The action will automatically fall back to npm if pnpm is incompatible
+> 3. Consider using npm or yarn instead if upgrading Node.js is not an option
 
 ### Node.js Path Customization
 You can now specify a custom path to your Node.js installation:
 - Useful for environments with multiple Node.js versions
 - Makes the action compatible with non-standard cPanel setups
 - Default is set to cPanel's EA-NodeJS 18 path
+- **Improved Implementation**: The action now automatically adds the Node.js path to the `PATH` environment variable, similar to how it would be done in `.bashrc`, making all Node.js binaries available without specifying full paths
 
 ### PM2 Management (Optional)
 PM2 management can now be disabled if you're using another process manager:

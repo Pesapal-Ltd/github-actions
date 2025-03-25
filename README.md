@@ -142,6 +142,7 @@ This action deploys a Node.js application to a cPanel server using SSH and start
     pm2_config_path: "ecosystem.config.js"
     cleanup_old_deployments: "true"
     keep_deployments: "5"
+    pnpm_path: "/path/to/compatible/pnpm" # For pnpm compatibility issues
 ```
 
 ## How to Use These Actions
