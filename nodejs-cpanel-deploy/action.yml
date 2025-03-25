@@ -77,6 +77,16 @@ inputs:
     description: "Path to PM2 ecosystem config file (relative to app directory)"
     required: false
     default: "ecosystem.config.js"
+  
+  cleanup_old_deployments:
+    description: "Whether to cleanup old deployment packages"
+    required: false
+    default: "false"
+  
+  keep_deployments:
+    description: "Number of recent deployments to keep when cleanup is enabled"
+    required: false
+    default: "5"
 
 runs:
   using: "composite"
@@ -148,6 +158,47 @@ runs:
             fi
           else
             echo "PM2 management is disabled. Skipping PM2 restart."
+          fi
+          
+          # Cleanup old deployments if enabled
+          if [ "${{ inputs.cleanup_old_deployments }}" = "true" ]; then
+            echo "Cleaning up old deployment packages..."
+            # Get the currently active deployment to ensure it's not deleted
+            ACTIVE_DEPLOYMENT=$(cat ${{ inputs.app_dir }}/active-${{ inputs.app_name }})
+            
+            # Create a list of deployment files sorted by timestamp (newest first)
+            DEPLOYMENT_FILES=$(ls -t ${{ inputs.app_dir }}/${{ inputs.app_name }}-*.zip)
+            
+            # Count total number of deployments
+            TOTAL_DEPLOYMENTS=$(echo "$DEPLOYMENT_FILES" | wc -l)
+            
+            # Skip cleanup if we have fewer deployments than we want to keep
+            if [ $TOTAL_DEPLOYMENTS -le ${{ inputs.keep_deployments }} ]; then
+              echo "Only $TOTAL_DEPLOYMENTS deployments found, less than or equal to the ${{ inputs.keep_deployments }} you want to keep. Skipping cleanup."
+            else
+              # Calculate how many to delete (total - keep)
+              TO_DELETE=$((TOTAL_DEPLOYMENTS - ${{ inputs.keep_deployments }}))
+              echo "Found $TOTAL_DEPLOYMENTS deployments, keeping ${{ inputs.keep_deployments }}, will delete $TO_DELETE"
+              
+              # Get list of files to delete (oldest first, limited to the number we want to delete)
+              FILES_TO_DELETE=$(ls -tr ${{ inputs.app_dir }}/${{ inputs.app_name }}-*.zip | head -n $TO_DELETE)
+              
+              # Delete each file unless it's the active deployment
+              for file in $FILES_TO_DELETE; do
+                # Extract just the filename
+                filename=$(basename "$file")
+                
+                # Skip if this is the active deployment
+                if [ "$filename" = "$ACTIVE_DEPLOYMENT" ]; then
+                  echo "Skipping active deployment: $filename"
+                else
+                  echo "Deleting old deployment: $filename"
+                  rm -f "$file"
+                fi
+              done
+              
+              echo "Cleanup completed. Kept the ${{ inputs.keep_deployments }} most recent deployments."
+            fi
           fi
           
     - name: Rollback application

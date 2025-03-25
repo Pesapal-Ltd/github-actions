@@ -140,6 +140,8 @@ This action deploys a Node.js application to a cPanel server using SSH and start
     package_manager: "npm" # npm, yarn, pnpm, or bun
     use_pm2: "true"
     pm2_config_path: "ecosystem.config.js"
+    cleanup_old_deployments: "true"
+    keep_deployments: "5"
 ```
 
 ## How to Use These Actions

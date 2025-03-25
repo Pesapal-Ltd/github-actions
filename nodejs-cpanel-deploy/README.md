@@ -70,6 +70,8 @@ jobs:
           package_manager: "npm"
           use_pm2: "true"
           pm2_config_path: "ecosystem.config.js"
+          cleanup_old_deployments: "true"
+          keep_deployments: "5"
 ```
 
 ## Example Workflows
@@ -90,24 +92,26 @@ See the [examples directory](./examples/) for more information on our workflow o
 
 ## Inputs
 
-| Input                | Description                                 | Required | Default                     |
-|----------------------|---------------------------------------------|----------|----------------------------|
-| `app_dir`            | Root directory on cPanel server             | No       | `~/repositories`           |
-| `app_name`           | Your application name                       | Yes      | -                          |
-| `package_path`       | Path to the zipped application              | Yes (for deploy) | -                 |
-| `timestamp`          | Timestamp for the deployment                | Yes      | -                          |
-| `host`               | Hostname or IP of the cPanel server         | Yes      | -                          |
-| `username`           | cPanel username                             | Yes      | -                          |
-| `password`           | cPanel password (for password auth)         | For password auth | -               |
-| `ssh_key`            | SSH private key (for SSH key auth)          | For SSH key auth | -                |
-| `key_passphrase`     | Passphrase for the SSH key                  | No       | -                          |
-| `auth_method`        | `ssh_key` or `password`                     | Yes      | `ssh_key`                  |
-| `operation`          | `deploy` or `rollback`                      | No       | `deploy`                   |
-| `rollback_timestamp` | Timestamp to roll back to                   | For rollbacks | -                     |
-| `nodejs_path`        | Path to Node.js installation on server      | No       | `/opt/cpanel/ea-nodejs18/bin` |
-| `package_manager`    | Package manager (npm, yarn, pnpm, bun)      | No       | `npm`                      |
-| `use_pm2`            | Whether to manage app with PM2              | No       | `true`                     |
-| `pm2_config_path`    | Path to PM2 config file                     | No       | `ecosystem.config.js`      |
+| Input                   | Description                                 | Required | Default                     |
+|-------------------------|---------------------------------------------|----------|----------------------------|
+| `app_dir`               | Root directory on cPanel server             | No       | `~/repositories`           |
+| `app_name`              | Your application name                       | Yes      | -                          |
+| `package_path`          | Path to the zipped application              | Yes (for deploy) | -                 |
+| `timestamp`             | Timestamp for the deployment                | Yes      | -                          |
+| `host`                  | Hostname or IP of the cPanel server         | Yes      | -                          |
+| `username`              | cPanel username                             | Yes      | -                          |
+| `password`              | cPanel password (for password auth)         | For password auth | -               |
+| `ssh_key`               | SSH private key (for SSH key auth)          | For SSH key auth | -                |
+| `key_passphrase`        | Passphrase for the SSH key                  | No       | -                          |
+| `auth_method`           | `ssh_key` or `password`                     | Yes      | `ssh_key`                  |
+| `operation`             | `deploy` or `rollback`                      | No       | `deploy`                   |
+| `rollback_timestamp`    | Timestamp to roll back to                   | For rollbacks | -                     |
+| `nodejs_path`           | Path to Node.js installation on server      | No       | `/opt/cpanel/ea-nodejs18/bin` |
+| `package_manager`       | Package manager (npm, yarn, pnpm, bun)      | No       | `npm`                      |
+| `use_pm2`               | Whether to manage app with PM2              | No       | `true`                     |
+| `pm2_config_path`       | Path to PM2 config file                     | No       | `ecosystem.config.js`      |
+| `cleanup_old_deployments` | Whether to delete old deployment packages | No       | `false`                    |
+| `keep_deployments`      | Number of recent deployments to keep        | No       | `5`                        |
 
 ## New Customization Features
 
@@ -135,6 +139,14 @@ You can specify a custom path to your PM2 ecosystem config:
 - Default is `ecosystem.config.js` in your application root
 - Allows for environment-specific PM2 configurations
 - Action will attempt to use package.json start script if the config file is not found
+
+### Deployment Cleanup
+The action now supports automatic cleanup of old deployment packages:
+- Enable with `cleanup_old_deployments: "true"`
+- Control how many recent deployments to keep with `keep_deployments` (default: 5)
+- Oldest deployments will be removed first
+- Active deployment is always protected from cleanup
+- Helps manage disk space on the server by removing unnecessary old deployment packages
 
 ## Authentication Methods
 
